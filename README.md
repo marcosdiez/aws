@@ -8,11 +8,11 @@ This scripts solves this issue for good.
     xibrapz.mynicedomain.com
 
 1. aws.py set_ec2_dns mynicedomain.com
-1. wait 1 minute because AWS has to sync...
+1. wait 1 minute because AWS has to sync
 1. ssh ubuntu@xibrapz.mynicedomain.com
 
 
-Bonus commands:
+# Bonus commands:
 
 ```
 aws.py show_dns # shows all route53 entries
