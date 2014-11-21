@@ -1,11 +1,9 @@
 #!/usr/bin/env python
 import sys
 import re
-import boto
 import boto.ec2
-import boto.ec2.elb
 import boto.route53
-import boto.rds
+
 
 from aws_credentials import *
 
@@ -41,6 +39,12 @@ class Aws(object):
                     instances.append(instance)
         return instances
 
+    def show_dns_domains(self):
+        zones = self.route53().get_all_hosted_zones().ListHostedZonesResponse.HostedZones
+        print "Available domains at route53"
+        for zone in zones:
+            print zone.Name[:-1]
+
     def show_dns(self):
         zones = self.route53().get_all_hosted_zones().ListHostedZonesResponse.HostedZones
         for zone in zones:
@@ -52,7 +56,7 @@ class Aws(object):
 
     def show_ec2(self):
         instances = self._get_running_ec2_intances()
-        print "EC2 ID\t\tSTATE\tIP\t\tDNS"
+        print "EC2_ID\t\tSTATE\tIP\t\tDNS"
         for instance in instances:
             print "{}\t{}\t{}\t{}\t{}".format(
             instance.id,
@@ -127,7 +131,7 @@ class Aws(object):
 
 
 def main():
-    valid_args = ("show_dns", "show_ec2", "set_ec2_dns")
+    valid_args = ("show_dns", "show_ec2", "set_ec2_dns", "show_dns_domains")
     if len(sys.argv) == 1 or sys.argv[1] not in valid_args:
         print "valid_args: {}".format(valid_args)
         return
