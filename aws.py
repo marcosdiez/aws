@@ -2,6 +2,7 @@
 import sys
 import re
 import boto.ec2
+import boto.rds
 import boto.route53
 
 
@@ -16,10 +17,30 @@ def mdebug(elem):
     print elem.__dict__
     print "D--"
 
+
+class AwsObject(object):
+    def __init__(self, instance):
+        self.instance = instance
+
+class RdsObject(AwsObject):
+    def name(self, domain):
+        return "{}.{}".format(self.instance.id, domain)
+
+    def dns(self):
+        return self.instance.endpoint[0]
+
+class Ec2Object(AwsObject):
+    def name(self, domain):
+        return self.instance.tags["Name"]
+
+    def dns(self):
+        return self.instance.public_dns_name
+
 class Aws(object):
     def __init__(self):
         self._ec2 = None
         self._route53 = None
+        self._rds = None
 
     def ec2(self):
         if self._ec2 is None:
@@ -31,12 +52,25 @@ class Aws(object):
             self._route53 = boto.route53.connection.Route53Connection(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
         return self._route53
 
+    def rds(self):
+        if self._rds is None:
+            self._rds = boto.rds.connect_to_region(AWS_REGION, aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+        return self._rds
+
+    def _get_running_rds_intances(self):
+        instances = []
+        for instance in self.rds().get_all_dbinstances():
+            if instance.status == "available":
+                instances.append(RdsObject(instance))
+        return instances
+
+
     def _get_running_ec2_intances(self):
         instances = []
         for reservation in self.ec2().get_all_instances():
             for instance in reservation.instances:
                 if instance.state not in ("terminated", "stopped"):
-                    instances.append(instance)
+                    instances.append(Ec2Object(instance))
         return instances
 
     def show_dns_domains(self):
@@ -53,12 +87,27 @@ class Aws(object):
             for record in records:
                 print "{}\t\t\t{}\t{}\t".format(record.name, record.type, record.to_print())
 
+    def show_rds(self, instances = None):
+        mask = "{:25s} {:10s} {:10s} {:5} {}"
+        print mask.format("RDS_ID", "USERNAME", "ENGINE", " PORT", "DNS")
+        if instances is None:
+            instances = self._get_running_rds_intances()
+        for instance in instances:
+            instance = instance.instance
+            print mask.format(
+            instance.id,
+            instance.master_username,
+            instance.engine,
+            instance.endpoint[1],
+            instance.endpoint[0],
+            )
 
     def show_ec2(self):
-        instances = self._get_running_ec2_intances()
         print "EC2_ID\t\tSTATE\tIP\t\tDNS"
+        instances = self._get_running_ec2_intances()
         for instance in instances:
-            print "{}\t{}\t{}\t{}\t{}".format(
+            instance = instance.instance
+            print "{}\t{}\t{}\t{:50s}\t{}".format(
             instance.id,
             instance.state,
             instance.private_ip_address,
@@ -71,21 +120,36 @@ class Aws(object):
         records = self.route53().get_all_rrsets(zone.Id.split('/')[-1])
         return records
 
-
-    def set_ec2_dns(self, domain = None):
+    def check_parameters(self, domain):
         if domain is None:
-            print "Usage: set_ec2_dns DOMAIN_NAME_WHERE_DNS_WILL_BE_SET"
+            print "As paramenter, please provide DOMAIN_NAME_WHERE_DNS_WILL_BE_SET"
             sys.exit(2)
             return
         if not self.is_valid_dns(domain):
             print "Error: [{}] is not a valid domain.".format(domain)
             sys.exit(1)
-        print "Obtaining EC2 instances list"
+
+    def set_aws_dns(self, domain = None):
+        self.check_parameters(domain)
+        self.set_rds_dns(domain)
+        self.set_ec2_dns(domain)
+
+    def set_rds_dns(self, domain = None):
+        self.check_parameters(domain)
+        print "Obtaining RDS instances list"
+        instances = self._get_running_rds_intances()
+        self.show_rds(instances)
+        self._set_dns3(domain, instances)
+
+    def set_ec2_dns(self, domain = None):
+        self.check_parameters(domain)
+        print "Obtaining EC2 instances list which the name looks like a DNS entry"
         instances = self._get_running_ec2_intances()
         instances_to_set_dns = []
         for instance in instances:
-            if self.is_interesting_dns(instance.tags["Name"], domain):
+            if self.is_interesting_dns(instance.name(domain), domain):
                 instances_to_set_dns.append(instance)
+                instance = instance.instance
                 print "{}\t{}\t{}\t{}\t{}".format(
                 instance.id,
                 instance.state,
@@ -97,13 +161,12 @@ class Aws(object):
 
         self._set_dns3(domain, instances_to_set_dns)
 
-
     def _set_dns3(self, domain, instances_to_set_dns):
         records = self._get_recods(domain)
         print "Delete existing records..."
         for record in records:
             for instance in instances_to_set_dns:
-                dns_name = "{}.".format(instance.tags["Name"])
+                dns_name = "{}.".format(instance.name(domain))
                 if record.name == dns_name:
                     deleted_record = records.add_change("DELETE", record.name, record.type, record.ttl)
                     deleted_record.add_value(record.to_print())
@@ -111,10 +174,9 @@ class Aws(object):
 
         print "Creating new records"
         for instance in instances_to_set_dns:
-            name = instance.tags["Name"]
-            new_record = records.add_change("CREATE", name, "CNAME", 60)
-            new_record.add_value(instance.public_dns_name)
-            print "CNAME: {}, {}".format(name, instance.public_dns_name)
+            new_record = records.add_change("CREATE", instance.name(domain), "CNAME")
+            new_record.add_value(instance.dns())
+            print "{:50s} CNAME {}".format(instance.name(domain), instance.dns())
         print "Saving..."
         print records.commit()
         print "Done"
@@ -131,7 +193,7 @@ class Aws(object):
 
 
 def main():
-    valid_args = ("show_dns", "show_ec2", "set_ec2_dns", "show_dns_domains")
+    valid_args = ("show_dns", "show_ec2", "show_rds", "set_ec2_dns", "set_rds_dns", "set_aws_dns", "show_dns_domains")
     if len(sys.argv) == 1 or sys.argv[1] not in valid_args:
         print "valid_args: {}".format(valid_args)
         return
