@@ -31,7 +31,10 @@ class RdsObject(AwsObject):
 
 class Ec2Object(AwsObject):
     def name(self, domain):
-        return self.instance.tags["Name"]
+        try:
+            return self.instance.tags["Name"]
+        except:
+            return "[instance has no name]"
 
     def dns(self):
         return self.instance.public_dns_name
@@ -107,12 +110,16 @@ class Aws(object):
         instances = self._get_running_ec2_intances()
         for instance in instances:
             instance = instance.instance
+            try:
+                the_name = instance.tags["Name"]
+            except:
+                the_name = "[instance has no name]"
             print "{}\t{}\t{}\t{:50s}\t{}".format(
             instance.id,
             instance.state,
             instance.private_ip_address,
             instance.public_dns_name,
-            instance.tags["Name"],
+            the_name,
             )
 
     def _get_recods(self, domain):
@@ -139,6 +146,9 @@ class Aws(object):
         print "Obtaining RDS instances list"
         instances = self._get_running_rds_intances()
         self.show_rds(instances)
+        if len(instances) == 0:
+            print "No RDS instances to set DNS"
+            return
         self._set_dns3(domain, instances)
 
     def set_ec2_dns(self, domain = None):
@@ -158,7 +168,9 @@ class Aws(object):
                 instance.tags["Name"],
                 )
 
-
+        if len(instances_to_set_dns) == 0:
+            print "No EC2 instances to set DNS"
+            return
         self._set_dns3(domain, instances_to_set_dns)
 
     def _set_dns3(self, domain, instances_to_set_dns):
