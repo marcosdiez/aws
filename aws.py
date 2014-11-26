@@ -1,6 +1,8 @@
 #!/usr/bin/env python
+from __future__ import unicode_literals
 import sys
 import re
+import time
 import boto.ec2
 import boto.rds
 import boto.route53
@@ -22,24 +24,33 @@ class AwsObject(object):
     def __init__(self, instance):
         self.instance = instance
 
+    def id(self):
+        return self.instance.id
+
 class RdsObject(AwsObject):
-    def name(self, domain):
+    def name(self, domain = None):
+        if domain is None:
+            return self.instance.id
         return "{}.{}".format(self.instance.id, domain)
 
     def dns(self):
         return self.instance.endpoint[0]
 
 class Ec2Object(AwsObject):
-    def name(self, domain):
+    def name(self, domain = None):
         try:
             return self.instance.tags["Name"]
         except:
             return "[instance has no name]"
 
+    def state(self):
+        return self.instance.state
+
     def dns(self):
         return self.instance.public_dns_name
 
 class Aws(object):
+
     def __init__(self):
         self._ec2 = None
         self._route53 = None
@@ -72,9 +83,30 @@ class Aws(object):
         instances = []
         for reservation in self.ec2().get_all_instances():
             for instance in reservation.instances:
-                if instance.state not in ("terminated", "stopped"):
+                if instance.state not in ("terminated", "stopped", "shutting-down", "stopping"):
                     instances.append(Ec2Object(instance))
         return instances
+
+    def _get_ec2_instance(self, instance_id):
+        result = self.ec2().get_all_instances(instance_ids=(instance_id,))
+        reservation = result[0]
+        instance = reservation.instances[0]
+        return Ec2Object(instance)
+
+    def _get_running_ec2_intances(self):
+        return self._get_ec2_intances( ("running", "pending") )
+
+    def _get_ec2_intances(self, states=None):
+        if states.__class__ == "some_string".__class__:
+            sates = (states, )
+
+        instances = []
+        for reservation in self.ec2().get_all_instances():
+            for instance in reservation.instances:
+                if instance.state in states:
+                    instances.append(Ec2Object(instance))
+        return instances
+
 
     def show_dns_domains(self):
         zones = self.route53().get_all_hosted_zones().ListHostedZonesResponse.HostedZones
@@ -105,9 +137,17 @@ class Aws(object):
             instance.endpoint[0],
             )
 
+    def show_ec2_stopped(self):
+        instances = self._get_ec2_intances("stopped")
+        self._show_ec2_helper(instances)
+
+
     def show_ec2(self):
-        print "EC2_ID\t\tSTATE\tIP\t\tDNS"
         instances = self._get_running_ec2_intances()
+        self._show_ec2_helper(instances)
+
+    def _show_ec2_helper(self, instances):
+        print "EC2_ID\t\tSTATE\tIP\t\tDNS"
         for instance in instances:
             instance = instance.instance
             try:
@@ -208,12 +248,39 @@ class Aws(object):
         print forma.format("id", "name", "description")
         for ami in amis:
             print forma.format(ami.id, ami.name, ami.description)
-            #mdebug(m)
 
+    def launch_ec2(self, instance_name_or_id = None):
+        if instance_name_or_id is None:
+            print "Usage: launch_ec2 NAME_OR_ID_OF_INSTANCE_TO_LAUNCH"
+            return
 
+        print "Attempting to launch and set DNS of [{}]".format(instance_name_or_id)
+        print "Getting list of available EC2 instances"
+        instances = self._get_ec2_intances(("stopped", "running"))
+        print "Looking for EC2 instance..."
+        for instance in instances:
+            if instance.id() == instance_name_or_id or instance.name() == instance_name_or_id:
+                print "Instance found. Id={} Name={}".format(instance.id(), instance.name())
+                if instance.state() == "stopped":
+                    print "Launching instance..."
+                    self.ec2().start_instances( (instance.id(),))
+                self._wait_and_set_dns(instance.id())
+                return
+        print "No instance was found. List them with show_ec2_stopped."
+
+    def _wait_and_set_dns(self, instance_id):
+        print "Setting DNS..."
+        for i in range(1, 10):
+            print "Checking if the instance is already running"
+            instance = self._get_ec2_instance(instance_id)
+            if instance.state() == "running":
+                self._set_dns3("3sdv.com" , (instance,))
+                return
+            print "Instance still not running ([]].  Sleeping 10 seconds...".format(instance.state())
+            time.sleep(10)
 
 def main():
-    valid_args = ("show_dns", "show_ec2", "show_rds", "set_ec2_dns", "set_rds_dns", "set_aws_dns", "show_dns_domains", "show_amis")
+    valid_args = ("show_dns", "show_ec2", "show_ec2_stopped", "show_rds", "set_ec2_dns", "set_rds_dns", "set_aws_dns", "show_dns_domains", "show_amis", "launch_ec2")
     if len(sys.argv) == 1 or sys.argv[1] not in valid_args:
         print "valid_args: {}".format(valid_args)
         return
