@@ -202,10 +202,18 @@ class Aws(object):
         rgx = re.compile("^([a-z0-9-]+\.)+{}$".format(domain))
         return rgx.search(name) != None
 
+    def show_amis(self):
+        amis = self.ec2().get_all_images(owners="self")
+        forma = "{:15s} {:30s} {}s"
+        print forma.format("id", "name", "description")
+        for ami in amis:
+            print forma.format(ami.id, ami.name, ami.description)
+            #mdebug(m)
+
 
 
 def main():
-    valid_args = ("show_dns", "show_ec2", "show_rds", "set_ec2_dns", "set_rds_dns", "set_aws_dns", "show_dns_domains")
+    valid_args = ("show_dns", "show_ec2", "show_rds", "set_ec2_dns", "set_rds_dns", "set_aws_dns", "show_dns_domains", "show_amis")
     if len(sys.argv) == 1 or sys.argv[1] not in valid_args:
         print "valid_args: {}".format(valid_args)
         return
