@@ -147,15 +147,17 @@ class Aws(object):
         self._show_ec2_helper(instances)
 
     def _show_ec2_helper(self, instances):
-        print "EC2_ID\t\tSTATE\tIP\t\tDNS"
+        mask = "{:11s} {:10s} {:10s} {:16s} {:52s} {}"
+        print mask.format("EC2_ID", "TYPE", "STATE", "IP", "DNS", "NAME")
         for instance in instances:
             instance = instance.instance
             try:
                 the_name = instance.tags["Name"]
             except:
                 the_name = "[instance has no name]"
-            print "{}\t{}\t{}\t{:50s}\t{}".format(
+            print mask.format(
             instance.id,
+            instance.instance_type,
             instance.state,
             instance.private_ip_address,
             instance.public_dns_name,
