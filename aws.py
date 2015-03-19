@@ -49,6 +49,19 @@ class Ec2Object(AwsObject):
     def dns(self):
         return self.instance.public_dns_name
 
+class CnameEntry(AwsObject):
+    def __init__(self, full_domain, target_cname):
+        self._name = full_domain
+        self.id = full_domain
+        self.target_cname = target_cname
+        self.instance = self
+
+    def name(self, domain = None):
+        return self._name
+
+    def dns(self):
+        return self.target_cname
+
 class Aws(object):
 
     def __init__(self):
@@ -193,6 +206,36 @@ class Aws(object):
             return
         self._set_dns3(domain, instances)
 
+    def set_dns(self, new_dns_entry, cname_or_ipv4):
+        "sets a dns new_dns_entry = CNAME or IP address"
+
+        if not self.is_valid_dns(new_dns_entry):
+            print("Error: Domain [{}] is not a valid DNS".format(new_dns_entry))
+            return
+
+        if not self.is_valid_dns(cname_or_ipv4):
+            print("[{}] is not a valid DNS nor IPv4".format(cname_or_ipv4))
+            return
+
+        split_domain = new_dns_entry.split(".")
+        if len(split_domain) < 3:
+            print "Error: You have no subdomain. try using XXXXXX.{}".format(new_dns_entry)
+            return
+
+        dns_entry_type = "CNAME"
+        if self.is_ipv4(cname_or_ipv4):
+            print("Sorry. For now we only accept CNAMEs")
+            dns_entry_type = "A"
+            return
+
+        print "Setting DNS: {} -> {} [type: {}]".format(new_dns_entry, cname_or_ipv4, dns_entry_type)
+
+        domain = ".".join(split_domain[-2:])
+        #subdomain = ".".join(split_domain[0:-2])
+
+        new_entry = CnameEntry(new_dns_entry, cname_or_ipv4)
+        self._set_dns3(domain, [ new_entry ] )
+
     def set_ec2_dns(self, domain = None):
         self.check_parameters(domain)
         print "Obtaining EC2 instances list which the name looks like a DNS entry"
@@ -234,6 +277,25 @@ class Aws(object):
         print "Saving..."
         print records.commit()
         print "Done"
+
+    def is_ipv4(self, possible_ip):
+        #buggy, but good enough
+        parts = possible_ip.split(".")
+        if len(parts) != 4:
+            return False
+        for item in parts:
+            if item != item.strip():
+                return False
+            if item != "0" and item[0] == "0":
+                return False
+            try:
+                item_int = int(item)
+            except ValueError:
+                return False
+            if not 0 <= item_int <= 255:
+                return False
+        return True
+
 
     def is_valid_dns(self, name):
         rgx = re.compile("^[a-z0-9-]+\\.([a-z0-9-]+\\.)*[a-z0-9-]+$")
@@ -282,7 +344,7 @@ class Aws(object):
             time.sleep(10)
 
 def main():
-    valid_args = ("show_dns", "show_ec2", "show_ec2_stopped", "show_rds", "set_ec2_dns", "set_rds_dns", "set_aws_dns", "show_dns_domains", "show_amis", "launch_ec2")
+    valid_args = ("show_dns", "show_ec2", "show_ec2_stopped", "show_rds", "set_ec2_dns", "set_rds_dns", "set_aws_dns", "show_dns_domains", "show_amis", "launch_ec2", "set_dns")
     if len(sys.argv) == 1 or sys.argv[1] not in valid_args:
         print "valid_args: {}".format(valid_args)
         return
