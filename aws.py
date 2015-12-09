@@ -125,15 +125,37 @@ class Aws(object):
         zones = self.route53().get_all_hosted_zones().ListHostedZonesResponse.HostedZones
         print "Available domains at route53"
         for zone in zones:
-            print zone.Name[:-1]
+            self._print_zone(zone)
+            # print zone
 
-    def show_dns(self):
+    def _print_zone(self, zone):
+        private = getattr(zone["Config"], "PrivateZone", "false")
+        if private == "false":
+            private = "public "
+        else:
+            private = "private"
+        print "{:30} {} {}".format(zone.Name[:-1], private, getattr(zone["Config"], "Comment", ""))
+
+    def show_dns(self, domain=None, private=None):
         zones = self.route53().get_all_hosted_zones().ListHostedZonesResponse.HostedZones
         for zone in zones:
-            print zone.Name
+            if domain is not None:
+                name = zone.Name
+                if name != domain and name != domain + ".":
+                    continue
+            if private is not None:
+                zone_private = getattr(zone["Config"], "PrivateZone", "false")
+                if (private == True or private.lower() == "true") and zone_private.lower() != "true":
+                    continue
+                if (private == False or private.lower() == "false") and zone_private.lower() != "false":
+                    continue
+
+            print "----------------------------------------------------------------------------------------------------------------"
+            self._print_zone(zone)
+            print "----------------------------------------------------------------------------------------------------------------"
             records = self.route53().get_all_rrsets(zone.Id.split('/')[-1])
             for record in records:
-                print "{}\t\t\t{}\t{}\t".format(record.name, record.type, record.to_print())
+                print "{:50} {:10} {}".format(record.name, record.type, record.to_print())
 
     def show_rds(self, instances = None):
         mask = "{:25s} {:10s} {:10s} {:5} {}"
